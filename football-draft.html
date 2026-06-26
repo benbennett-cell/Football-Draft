@@ -239,7 +239,7 @@ firebase.initializeApp({
 const db = firebase.database();
 
 // ===== COUNTRIES =====
-const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic","Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
+const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Antigua and Barbuda","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cabo Verde","Cambodia","Cameroon","Canada","Central African Republic","Chad","Chile","China","Colombia","Comoros","Congo","Costa Rica","Croatia","Cuba","Cyprus","Czech Republic","Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Ivory Coast","Israel","Italy","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","England","Scotland","Wales","Northern Ireland","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
 
 // ===== FORMATIONS =====
 // x,y = percent of pitch width/height; GK at bottom (y~90), attack at top (y~15)
@@ -319,6 +319,7 @@ let roomRef = null, roomData = null;
 let viewId = null; // which player's pitch to view
 let pendingSlotId = null, pendingSlotPos = null, pendingSlotType = null;
 let panelOpen = false;
+let moveSourceSlot = null; // slot id of player being moved
 
 // ===== UTIL =====
 function $id(id) { return document.getElementById(id); }
@@ -346,6 +347,7 @@ function buildOrder(playerIds, totalPicks) {
 }
 
 // ===== HOME =====
+
 async function createRoom() {
   const name = $id('inp-name').value.trim();
   if (!name) { toast('Enter your name','err'); return; }
@@ -472,18 +474,47 @@ function renderPitch(pid) {
   const formation = sq.formation || '4-3-3';
   const slotDefs = FORMATIONS[formation] || FORMATIONS['4-3-3'];
   const filledSlots = sq.slots || {};
-  const canClick = pid === myId && isMyTurn();
-  $id('pitch-container').innerHTML = makePitchSVG(slotDefs, filledSlots, canClick);
+  const isMe = pid === myId;
+  const canDraft = isMe && isMyTurn();
+  $id('pitch-container').innerHTML = makePitchSVG(slotDefs, filledSlots, canDraft, moveSourceSlot);
   // Attach click listeners
   slotDefs.forEach(sd => {
-    if (!filledSlots[sd.id] && canClick) {
-      const g = document.querySelector(`#slot-${sd.id}`);
-      if (g) g.addEventListener('click', () => openModal(sd.id, sd.pos, sd.t));
+    const g = document.querySelector(`#slot-${sd.id}`);
+    if (!g) return;
+    if (moveSourceSlot) {
+      // Move mode: clicking an empty slot moves the player there
+      if (!filledSlots[sd.id] && isMe) {
+        g.addEventListener('click', () => movePlayerTo(sd.id));
+      } else if (sd.id === moveSourceSlot) {
+        // clicking the selected slot again cancels move mode
+        g.addEventListener('click', () => { moveSourceSlot = null; renderPitch(pid); });
+      }
+    } else {
+      if (!filledSlots[sd.id] && canDraft) {
+        g.addEventListener('click', () => openModal(sd.id, sd.pos, sd.t));
+      } else if (filledSlots[sd.id] && isMe) {
+        // clicking a filled slot on your own pitch enters move mode
+        g.addEventListener('click', () => { moveSourceSlot = sd.id; renderPitch(pid); });
+      }
     }
   });
 }
 
-function makePitchSVG(slotDefs, filledSlots, canClick) {
+async function movePlayerTo(targetSlotId) {
+  if (!moveSourceSlot || !targetSlotId) return;
+  const sq = (roomData.squads||{})[myId] || {};
+  const slots = sq.slots || {};
+  const playerData = slots[moveSourceSlot];
+  if (!playerData) { moveSourceSlot = null; return; }
+  const updates = {};
+  updates[`rooms/${roomCode}/squads/${myId}/slots/${targetSlotId}`] = { ...playerData };
+  updates[`rooms/${roomCode}/squads/${myId}/slots/${moveSourceSlot}`] = null;
+  moveSourceSlot = null;
+  await db.ref().update(updates);
+  toast('Player moved!', 'ok');
+}
+
+function makePitchSVG(slotDefs, filledSlots, canClick, selectedSlot) {
   const W=320, H=480, R=19;
   const stripes = Array.from({length:8},(_,i)=>`<rect x="0" y="${i*60}" width="${W}" height="60" fill="${i%2===0?'#2d5a27':'#275121'}" opacity="0.8"/>`).join('');
   const pitch = `
@@ -509,20 +540,29 @@ function makePitchSVG(slotDefs, filledSlots, canClick) {
     const clickable = canClick && !filled;
     if (filled) {
       const short = filled.player.length > 9 ? filled.player.substring(0,9)+'…' : filled.player;
-      return `<g id="slot-${sd.id}" class="slot-group" style="cursor:default">
-        <circle cx="${cx}" cy="${cy}" r="${R}" fill="${color}" opacity="0.92"/>
-        <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="white" stroke-width="1.5" opacity="0.4"/>
+      const isSelected = selectedSlot === sd.id;
+      const isMovable = !selectedSlot; // on own pitch, all filled slots are clickable to select
+      const ringColor = isSelected ? '#f59e0b' : 'white';
+      const ringWidth = isSelected ? 3 : 1.5;
+      const ringOpacity = isSelected ? 1 : 0.4;
+      const pulse = isSelected ? `<animate attributeName="r" values="${R};${R+3};${R}" dur="1s" repeatCount="indefinite"/>` : '';
+      return `<g id="slot-${sd.id}" class="slot-group" style="cursor:pointer">
+        <circle cx="${cx}" cy="${cy}" r="${R}" fill="${color}" opacity="${isSelected?1:0.92}"/>
+        <circle cx="${cx}" cy="${cy}" r="${R}" fill="none" stroke="${ringColor}" stroke-width="${ringWidth}" opacity="${ringOpacity}">${pulse}</circle>
         <text x="${cx}" y="${cy+1}" text-anchor="middle" dominant-baseline="middle" fill="white" font-size="7.5" font-weight="700" font-family="system-ui">${short}</text>
-        <text x="${cx}" y="${cy+R+10}" text-anchor="middle" fill="${color}" font-size="8" font-weight="600" font-family="system-ui">${sd.pos}</text>
+        <text x="${cx}" y="${cy+R+10}" text-anchor="middle" fill="${isSelected?'#f59e0b':color}" font-size="8" font-weight="600" font-family="system-ui">${isSelected?'↕ move':sd.pos}</text>
       </g>`;
     } else {
-      const dashAnim = clickable ? `<animate attributeName="stroke-dashoffset" from="0" to="20" dur="1s" repeatCount="indefinite"/>` : '';
-      const glowAnim = clickable ? `<animate attributeName="opacity" values="0.5;1;0.5" dur="1.5s" repeatCount="indefinite"/>` : '';
-      return `<g id="slot-${sd.id}" class="slot-group${clickable?' clickable':''}" style="cursor:${clickable?'pointer':'default'}">
-        <circle cx="${cx}" cy="${cy}" r="${R}" fill="${color}18" stroke="${color}" stroke-width="${clickable?2.5:1.5}" stroke-dasharray="6 3">
+      const isDropTarget = !!selectedSlot;
+      const dashAnim = (clickable||isDropTarget) ? `<animate attributeName="stroke-dashoffset" from="0" to="20" dur="1s" repeatCount="indefinite"/>` : '';
+      const glowAnim = (clickable||isDropTarget) ? `<animate attributeName="opacity" values="0.5;1;0.5" dur="1.5s" repeatCount="indefinite"/>` : '';
+      const slotColor = isDropTarget ? '#f59e0b' : color;
+      const label = isDropTarget ? '↙ here' : sd.pos;
+      return `<g id="slot-${sd.id}" class="slot-group${(clickable||isDropTarget)?' clickable':''}" style="cursor:${(clickable||isDropTarget)?'pointer':'default'}">
+        <circle cx="${cx}" cy="${cy}" r="${R}" fill="${slotColor}18" stroke="${slotColor}" stroke-width="${(clickable||isDropTarget)?2.5:1.5}" stroke-dasharray="6 3">
           ${dashAnim}
         </circle>
-        <text x="${cx}" y="${cy+1}" text-anchor="middle" dominant-baseline="middle" fill="${color}" font-size="9.5" font-weight="700" font-family="system-ui">${sd.pos}
+        <text x="${cx}" y="${cy+1}" text-anchor="middle" dominant-baseline="middle" fill="${slotColor}" font-size="9.5" font-weight="700" font-family="system-ui">${label}
           ${glowAnim}
         </text>
         ${clickable ? `<text x="${cx}" y="${cy+R+10}" text-anchor="middle" fill="${color}99" font-size="7.5" font-family="system-ui">tap</text>` : ''}
@@ -672,12 +712,20 @@ function showResultPitch(pid) {
 
 function goHome() {
   if (roomRef) { roomRef.off(); roomRef=null; }
-  roomData=null; viewId=null; myId=null; myName=null; roomCode=null; isHost=false;
+  roomData=null; viewId=null; myId=null; myName=null; roomCode=null; isHost=false; moveSourceSlot=null;
   showScreen('home-screen');
 }
 
 // ===== KEYBOARD =====
-document.addEventListener('keydown', e => { if (e.key==='Escape') closeModal(); });
+document.addEventListener('keydown', e => {
+  if (e.key==='Escape') {
+    if (moveSourceSlot) { moveSourceSlot = null; if (viewId) renderPitch(viewId); }
+    else closeModal();
+  }
+});
+
+// ===== INIT =====
+window.addEventListener('load', () => showScreen('home-screen'));
 </script>
 </body>
 </html>
